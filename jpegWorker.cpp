@@ -6,10 +6,18 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <iostream>
-
+#include <vector>
 #include <jpeglib.h>
 
-void decompress(const unsigned char *jpg_buffer, unsigned long jpg_size)
+#include "base64.hpp"
+
+#include <opencv2/opencv.hpp>
+#include<opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
+
+#define uint8_t unsigned char
+
+void decompressJPEG(const unsigned char *jpg_buffer, unsigned long jpg_size, std::string &result)
 {
 
 	// Variables for the decompressor itself
@@ -115,13 +123,106 @@ void decompress(const unsigned char *jpg_buffer, unsigned long jpg_size)
 	write(fd, buf, rc); // Write the PPM image header before data
 	write(fd, bmp_buffer, bmp_size); // Write out all RGB pixel data
 
+    result = std::string(reinterpret_cast< char const* >(bmp_buffer));
+
 	close(fd);
 	free(bmp_buffer);
 
-	std::cout<<"End of decompression"<<std::endl;
+	std::cout<<"End of decompression, size = "<<bmp_size<<std::endl;
+
 }
 
-void compressJPEG(int ratio)
+void compressJPEG(const std::vector<uint8_t>& input, const int width, const int height, int ratio, std::vector<uint8_t>& output)
 {
-    
+
+    struct jpeg_compress_struct cinfo;
+    struct jpeg_error_mgr jerr;
+    JSAMPROW row_ptr[1];
+    int row_stride;
+
+    uint8_t* outbuffer = NULL;
+    uint64_t outlen = 0;
+
+    cinfo.err = jpeg_std_error(&jerr);
+    jpeg_create_compress(&cinfo);
+    jpeg_mem_dest(&cinfo, &outbuffer, &outlen);
+
+    // jrow is a libjpeg row of samples array of 1 row pointer
+    cinfo.image_width = width & -1;
+    cinfo.image_height = height & -1;
+    cinfo.input_components = 3;
+    cinfo.in_color_space = JCS_RGB;
+
+    jpeg_set_defaults(&cinfo);
+    jpeg_set_quality(&cinfo, ratio, TRUE);
+    jpeg_start_compress(&cinfo, TRUE);
+
+    std::vector<uint8_t> tmprowbuf(width * 3);
+
+    JSAMPROW row_pointer[1];
+    row_pointer[0] = &tmprowbuf[0];
+    while (cinfo.next_scanline < cinfo.image_height) {
+        //TODO
+        /*unsigned i, j;
+        unsigned offset = cinfo.next_scanline * cinfo.image_width * 2; //offset to the correct row
+        for (i = 0, j = 0; i < cinfo.image_width * 2; i += 4, j += 6) { //input strides by 4 bytes, output strides by 6 (2 pixels)
+            tmprowbuf[j + 0] = input[offset + i + 0]; // Y (unique to this pixel)
+            tmprowbuf[j + 1] = input[offset + i + 1]; // U (shared between pixels)
+            tmprowbuf[j + 2] = input[offset + i + 3]; // V (shared between pixels)
+            tmprowbuf[j + 3] = input[offset + i + 2]; // Y (unique to this pixel)
+            tmprowbuf[j + 4] = input[offset + i + 1]; // U (shared between pixels)
+            tmprowbuf[j + 5] = input[offset + i + 3]; // V (shared between pixels)
+        }*/
+        jpeg_write_scanlines(&cinfo, row_pointer, 1);
+    }
+
+    jpeg_finish_compress(&cinfo);
+    jpeg_destroy_compress(&cinfo);
+
+    std::cout << "libjpeg produced " << outlen << " bytes" << std::endl;
+
+    output = std::vector<uint8_t>(outbuffer, outbuffer + outlen);
+
+}
+
+/*std::string mat2str(const Mat &m)
+{
+    int params[3] = {0};
+	params[0] = CV_IMWRITE_JPEG_QUALITY;
+	params[1] = 100;
+
+    std::vector<uint8_t> buf;
+	bool code = cv::imencode(".jpg", m, buf, std::vector<int>(params, params+2));
+	uint8_t* result = reinterpret_cast<uint8_t*> (&buf[0]);
+
+	//return base64_encode(result, buf.size());
+    return result;
+}
+
+Mat str2mat(const std::string& s)
+{
+	// Decode data
+	std::string decoded_string = base64_decode(s);
+	std::vector<uint8_t> data(decoded_string.begin(), decoded_string.end());
+
+	cv::Mat img = imdecode(data, IMREAD_UNCHANGED);
+	return img;
+}*/
+
+std::string getCompressedImage(std::string &bigImage, std::string &smallImage)
+{
+    std::string decoded_string = base64_decode(s);
+	std::vector<uint8_t> data(decoded_string.begin(), decoded_string.end());
+
+	cv::Mat img = imdecode(data, IMREAD_UNCHANGED);
+
+    int params[3] = {0};
+	params[0] = CV_IMWRITE_JPEG_QUALITY;
+	params[1] = 60;
+
+    std::vector<uint8_t> buf;
+	bool code = cv::imencode(".jpg", m, buf, std::vector<int>(params, params+2));
+	uint8_t* result = reinterpret_cast<uint8_t*> (&buf[0]);
+
+	return base64_encode(result, buf.size());
 }
